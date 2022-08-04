@@ -1,83 +1,89 @@
-﻿public class Program
-{
-    private static readonly PriorityQueue<Action, long> _timeoutsQueue = new();
-    private static readonly Queue<Action> _eventQueue = new();
+﻿namespace SharpEventLoop;
 
-    private static long now;
+public static class Program
+{
+    private static IEventLoop? _eventLoop;
+    private static readonly CancellationTokenSource CancellationTokenSource = new();
 
     private static void Main()
     {
-        EnqueueEvent(Initialize);
-        do
+        try
         {
-            now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            HandleEventLoop();
-            HandleTimeoutsIntervals();
+            var unixTimeProvider = new UnixTimeProvider();
+            using var uiHandler = new UiHandler();
+            _eventLoop = new EventLoop(unixTimeProvider, uiHandler);
+            Console.CancelKeyPress += CancelKeyPressHandler;
+            _eventLoop.EnqueueEvent(Initialize);
+            _eventLoop.Run(CancellationTokenSource.Token);
         }
-        while (true);
-    }
-
-    private static void HandleEventLoop()
-    {
-        while (_eventQueue.TryDequeue(out var eventHandler))
+        finally
         {
-            eventHandler();
+            CancellationTokenSource.Dispose();
         }
     }
 
-    private static void HandleTimeoutsIntervals() 
+    private static void CancelKeyPressHandler(object? sender, ConsoleCancelEventArgs e)
     {
-        if (_timeoutsQueue.TryPeek(out _, out var timeout)
-            && timeout <= now)
+        e.Cancel = true;
+        _eventLoop!.EnqueueEvent(() =>
         {
-            var timeoutEventHandler = _timeoutsQueue.Dequeue();
-            EnqueueEvent(timeoutEventHandler);
-        }
-    }
-
-    private static Task SetTimeout(Action timeoutEventHandler, long timeout)
-    {
-        _timeoutsQueue.Enqueue(timeoutEventHandler, now + timeout);
-        return Task.CompletedTask;
-    }
-
-    private static void SetInterval(Action intervalHandler, long interval)
-    {
-        void TimeoutEventHandler()
-        {
-            intervalHandler();
-            SetTimeout(TimeoutEventHandler, interval);
-        }
-
-        SetTimeout(TimeoutEventHandler, interval);
+            CancellationTokenSource.Cancel();
+        });
     }
 
     private static void Initialize()
     {
-        SetInterval(HandleUI, 1000);
-        var rand = new Random();
-        foreach (var i in Enumerable.Range(1, 10000))
+        _eventLoop!.SetTimeout(() => ExampleTimeout(34), 500)
+            .Then(() =>
+            {
+                Console.WriteLine("Working");
+            });
+
+        _eventLoop!.SetInterval(ExampleInterval, 1000)
+            .Then(() =>
+            {
+                Console.WriteLine("Continue test :)");
+            })
+            .Then(() =>
+            {
+                Console.WriteLine("One more test");
+            });
+    }
+
+    private static void ExampleTimeout(int number)
+    {
+        Console.WriteLine($"My timeout #{number}");
+    }
+
+    private static void ExampleInterval()
+    {
+        Console.WriteLine($"My interval");
+    }
+
+    private static void StartSendingRequest()
+    {
+        Console.WriteLine("Request is start sending");
+        _eventLoop!.SetTimeout(CheckRequestStatus, 1000);
+    }
+
+    private static int progress = 0;
+
+    private static void CheckRequestStatus()
+    {
+        progress += 20;
+        Console.WriteLine($"Current progress: {progress}");
+        if (progress < 100)
         {
-            SetTimeout(ExampleTimeout, rand.Next(3000, 10000));
+            _eventLoop!.SetTimeout(CheckRequestStatus, 1000);
+        }
+        else
+        {
+            _eventLoop!.EnqueueEvent(FinishingRequest);
         }
     }
 
-    private static void ExampleTimeout()
+    private static void FinishingRequest()
     {
-        Console.WriteLine("My timeout");
-    }
-
-    private static long counter = 0;
-
-    private static void HandleUI()
-    {
-        counter++;
-        Console.WriteLine($"{counter}!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-    }
-
-    private static Task EnqueueEvent(Action eventHandler)
-    {
-        _eventQueue.Enqueue(eventHandler);
-        return Task.CompletedTask;
+        Console.WriteLine("Request finished");
     }
 }
