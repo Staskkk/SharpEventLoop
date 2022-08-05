@@ -4,10 +4,10 @@
     {
         void Run(CancellationToken cancellationToken);
 
-        IAsyncEvent SetTimeout(Action timeoutEventHandler, long timeout);
+        IAsyncEvent SetTimeout(Func<Task> timeoutEventHandler, long timeout);
 
-        IAsyncEvent SetInterval(Action intervalHandler, long interval);
+        IAsyncEvent SetInterval(Func<Task> intervalHandler, long interval);
 
-        IAsyncEvent EnqueueEvent(Action eventHandler);
+        IAsyncEvent EnqueueEvent(Func<Task> eventHandler);
     }
 }

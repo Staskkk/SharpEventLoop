@@ -1,13 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace SharpEventLoop
+﻿namespace SharpEventLoop
 {
     public interface IAsyncEvent
     {
-        IAsyncEvent Then(Action eventHandler);
+        IAsyncEvent Then(Func<Task> eventHandler);
+
+        IAsyncEvent Then(Func<Task> eventHandler, long delay);
     }
 }

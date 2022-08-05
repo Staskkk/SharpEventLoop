@@ -28,51 +28,70 @@ public static class Program
         _eventLoop!.EnqueueEvent(() =>
         {
             CancellationTokenSource.Cancel();
+            return Task.CompletedTask;
         });
     }
 
-    private static void Initialize()
+    private static Task Initialize()
     {
         _eventLoop!.SetTimeout(() => ExampleTimeout(34), 500)
             .Then(() =>
             {
                 Console.WriteLine("Working");
+                return Task.CompletedTask;
             });
 
-        _eventLoop!.SetInterval(ExampleInterval, 1000)
+        _eventLoop.SetInterval(ExampleInterval, 1000)
             .Then(() =>
             {
                 Console.WriteLine("Continue test :)");
-            })
+                return Task.CompletedTask;
+            }, 500)
             .Then(() =>
             {
                 Console.WriteLine("One more test");
-            });
+                return Task.CompletedTask;
+            }, 400);
+
+        _eventLoop.EnqueueEvent(StartSendingRequest)
+            .Then(() =>
+            {
+                Console.WriteLine("AFTER FINISHING REQUEST");
+                return Task.CompletedTask;
+            }, 400);
+
+        return Task.CompletedTask;
     }
 
-    private static void ExampleTimeout(int number)
+    private static Task ExampleTimeout(int number)
     {
         Console.WriteLine($"My timeout #{number}");
+        return Task.CompletedTask;
     }
 
-    private static void ExampleInterval()
+    private static Task ExampleInterval()
     {
         Console.WriteLine($"My interval");
+        return Task.CompletedTask;
     }
 
-    private static void StartSendingRequest()
+    private static TaskCompletionSource? _taskCompletionSource;
+    private static int _progress;
+
+    private static Task StartSendingRequest()
     {
         Console.WriteLine("Request is start sending");
+        _taskCompletionSource = new TaskCompletionSource();
+        _progress = 0;
         _eventLoop!.SetTimeout(CheckRequestStatus, 1000);
+        return _taskCompletionSource.Task;
     }
 
-    private static int progress = 0;
-
-    private static void CheckRequestStatus()
+    private static Task CheckRequestStatus()
     {
-        progress += 20;
-        Console.WriteLine($"Current progress: {progress}");
-        if (progress < 100)
+        _progress += 20;
+        Console.WriteLine($"Current progress: {_progress}");
+        if (_progress < 100)
         {
             _eventLoop!.SetTimeout(CheckRequestStatus, 1000);
         }
@@ -80,10 +99,14 @@ public static class Program
         {
             _eventLoop!.EnqueueEvent(FinishingRequest);
         }
+
+        return _taskCompletionSource!.Task;
     }
 
-    private static void FinishingRequest()
+    private static Task FinishingRequest()
     {
         Console.WriteLine("Request finished");
+        _taskCompletionSource!.SetResult();
+        return _taskCompletionSource.Task;
     }
 }
