@@ -1,4 +1,6 @@
-﻿namespace SharpEventLoop
+﻿using OneOf;
+
+namespace SharpEventLoop
 {
     public class EventLoop : IEventLoop
     {
@@ -26,10 +28,17 @@
             }
             
             var asyncEvent = _eventQueue.Dequeue();
-            asyncEvent.CurrentTask = asyncEvent.EventHandler!();
+            StartRunningAsyncEvent(asyncEvent);
 
             _runningEvents.AddLast(asyncEvent);
             _currentRunningEventNode ??= _runningEvents.First;
+        }
+
+        private static void StartRunningAsyncEvent(AsyncEvent asyncEvent)
+        {
+            asyncEvent.CurrentTask = asyncEvent.EventHandler!.Value.Match(
+                funcNoParams => funcNoParams(),
+                funcWithParam => funcWithParam(asyncEvent.PrevTaskResult));
         }
 
         private void HandleRunningEvent()
@@ -44,13 +53,40 @@
             if (currentAsyncEvent.CurrentTask!.IsCompleted)
             {
                 _runningEvents.Remove(_currentRunningEventNode);
-                if (currentAsyncEvent.Next != null)
-                {
-                    EnqueueAsyncEventInternal(currentAsyncEvent.Next, currentAsyncEvent.Delay);
-                }
+                HandleAsyncEventException(currentAsyncEvent);
+                EnqueueNextAsyncEvent(currentAsyncEvent);
             }
 
             _currentRunningEventNode = nextNode ?? _runningEvents.First;
+        }
+
+        private void HandleAsyncEventException(AsyncEvent currentAsyncEvent)
+        {
+            if (!currentAsyncEvent.CurrentTask!.IsFaulted || currentAsyncEvent.ExceptionHandler == null)
+            {
+                return;
+            }
+
+            var exceptionAsyncEvent = new AsyncEvent((Func<object?, Task>) currentAsyncEvent.ExceptionHandler)
+            {
+                PrevTaskResult = currentAsyncEvent.CurrentTask!.Exception
+            };
+            EnqueueAsyncEventInternal(exceptionAsyncEvent);
+        }
+
+        private void EnqueueNextAsyncEvent(AsyncEvent currentAsyncEvent)
+        {
+            if (currentAsyncEvent.Next == null || !currentAsyncEvent.CurrentTask!.IsCompletedSuccessfully)
+            {
+                return;
+            }
+
+            if (currentAsyncEvent.CurrentTask is Task<object?> taskWithResult)
+            {
+                currentAsyncEvent.Next.PrevTaskResult = taskWithResult.Result;
+            }
+
+            EnqueueAsyncEventInternal(currentAsyncEvent.Next, currentAsyncEvent.Delay);
         }
 
         public void Run(CancellationToken cancellationToken)
@@ -64,32 +100,91 @@
             }
         }
 
-        public IAsyncEvent SetTimeout(Func<Task> timeoutEventHandler, long timeout)
+        public IAsyncEvent EnqueueEvent(Action eventHandler)
         {
-            return EnqueueEventInternal(timeoutEventHandler, timeout);
-        }
-
-        public IAsyncEvent SetInterval(Func<Task> intervalHandler, long interval)
-        {
-            var asyncEvent = new AsyncEvent();
-            Task TimeoutEventHandler()
+            Task WrappedEventHandler()
             {
-                var nextAsyncEvent = asyncEvent.DeepCopy();
-                EnqueueAsyncEventInternal(nextAsyncEvent, interval);
-                return intervalHandler();
+                eventHandler();
+                return Task.CompletedTask;
             }
 
-            asyncEvent.EventHandler = TimeoutEventHandler;
-            EnqueueAsyncEventInternal(asyncEvent, interval);
-            return asyncEvent;
+            return EnqueueEvent(WrappedEventHandler);
         }
 
         public IAsyncEvent EnqueueEvent(Func<Task> eventHandler)
         {
             return EnqueueEventInternal(eventHandler);
         }
+        public IAsyncEvent EnqueueEvent<TResult>(Func<Task<TResult>> eventHandler)
+        {
+            return EnqueueEvent((Func<Task>)eventHandler);
+        }
 
-        private AsyncEvent EnqueueEventInternal(Func<Task> eventHandler, long timeout = 0)
+        public IAsyncEvent SetTimeout(Action timeoutEventHandler, long timeout)
+        {
+            Task WrappedTimeoutEventHandler()
+            {
+                timeoutEventHandler();
+                return Task.CompletedTask;
+            }
+            
+            return SetTimeout(WrappedTimeoutEventHandler, timeout);
+        }
+
+        public IAsyncEvent SetTimeout(Func<Task> timeoutEventHandler, long timeout)
+        {
+            return EnqueueEventInternal(timeoutEventHandler, timeout);
+        }
+
+        public IAsyncEvent SetTimeout<TResult>(Func<Task<TResult>> timeoutEventHandler, long timeout)
+        {
+            return SetTimeout((Func<Task>)timeoutEventHandler, timeout);
+        }
+
+        public IAsyncEvent SetInterval(Action intervalHandler, long interval)
+        {
+            var asyncEvent = new AsyncEvent();
+            Task WrappedIntervalEventHandler()
+            {
+                EnqueueNextIntervalEvent(asyncEvent, interval);
+                intervalHandler();
+                return Task.CompletedTask;
+            }
+
+            return SetIntervalInternal(asyncEvent, WrappedIntervalEventHandler, interval);
+        }
+
+        public IAsyncEvent SetInterval(Func<Task> intervalHandler, long interval)
+        {
+            var asyncEvent = new AsyncEvent();
+            Task WrappedIntervalEventHandler()
+            {
+                EnqueueNextIntervalEvent(asyncEvent, interval);
+                return intervalHandler();
+            }
+
+            return SetIntervalInternal(asyncEvent, WrappedIntervalEventHandler, interval);
+        }
+
+        public IAsyncEvent SetInterval<TResult>(Func<Task<TResult>> intervalHandler, long interval)
+        {
+            return SetInterval((Func<Task>)intervalHandler, interval);
+        }
+
+        private IAsyncEvent SetIntervalInternal(AsyncEvent asyncEvent, Func<Task> wrappedIntervalEventHandler, long interval)
+        {
+            asyncEvent.EventHandler = wrappedIntervalEventHandler;
+            EnqueueAsyncEventInternal(asyncEvent, interval);
+            return asyncEvent;
+        }
+
+        private void EnqueueNextIntervalEvent(AsyncEvent asyncEvent, long interval)
+        {
+            var nextAsyncEvent = asyncEvent.DeepCopy();
+            EnqueueAsyncEventInternal(nextAsyncEvent, interval);
+        }
+
+        private AsyncEvent EnqueueEventInternal(OneOf<Func<Task>, Func<object?, Task>> eventHandler, long timeout = 0)
         {
             var asyncEvent = new AsyncEvent(eventHandler);
             EnqueueAsyncEventInternal(asyncEvent, timeout);
