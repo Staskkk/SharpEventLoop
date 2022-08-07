@@ -34,11 +34,24 @@ namespace SharpEventLoop
             _currentRunningEventNode ??= _runningEvents.First;
         }
 
-        private static void StartRunningAsyncEvent(AsyncEvent asyncEvent)
+        private void StartRunningAsyncEvent(AsyncEvent asyncEvent)
         {
-            asyncEvent.CurrentTask = asyncEvent.EventHandler!.Value.Match(
-                funcNoParams => funcNoParams(),
-                funcWithParam => funcWithParam(asyncEvent.PrevTaskResult));
+            if (asyncEvent.TaskCancellationToken is {IsCancellationRequested: true})
+            {
+                HandleCanceledEventException(asyncEvent);
+                return;
+            }
+
+            try
+            {
+                asyncEvent.CurrentTask = asyncEvent.EventHandler!.Value.Match(
+                    funcNoParams => funcNoParams(),
+                    funcWithParam => funcWithParam(asyncEvent.PrevTaskResult));
+            }
+            catch (Exception exception)
+            {
+                EnqueueExceptionAsyncEvent(exception, asyncEvent.ExceptionHandler);
+            }
         }
 
         private void HandleRunningEvent()
@@ -53,6 +66,7 @@ namespace SharpEventLoop
             if (currentAsyncEvent.CurrentTask!.IsCompleted)
             {
                 _runningEvents.Remove(_currentRunningEventNode);
+                HandleCanceledEventException(currentAsyncEvent);
                 HandleAsyncEventException(currentAsyncEvent);
                 EnqueueNextAsyncEvent(currentAsyncEvent);
             }
@@ -62,14 +76,41 @@ namespace SharpEventLoop
 
         private void HandleAsyncEventException(AsyncEvent currentAsyncEvent)
         {
-            if (!currentAsyncEvent.CurrentTask!.IsFaulted || currentAsyncEvent.ExceptionHandler == null)
+            if (currentAsyncEvent.CurrentTask!.IsCanceled
+                || !currentAsyncEvent.CurrentTask.IsFaulted)
             {
                 return;
             }
 
-            var exceptionAsyncEvent = new AsyncEvent((Func<object?, Task>) currentAsyncEvent.ExceptionHandler)
+            EnqueueExceptionAsyncEvent(
+                currentAsyncEvent.CurrentTask.Exception!,
+                currentAsyncEvent.ExceptionHandler);
+        }
+
+        private void HandleCanceledEventException(AsyncEvent currentAsyncEvent)
+        {
+            if (currentAsyncEvent.TaskCancellationToken?.IsCancellationRequested == false
+                || currentAsyncEvent.CurrentTask?.IsCanceled == false)
             {
-                PrevTaskResult = currentAsyncEvent.CurrentTask!.Exception
+                return;
+            }
+
+            Exception exception = currentAsyncEvent.CurrentTask?.IsCanceled == true
+                ? new TaskCanceledException(currentAsyncEvent.CurrentTask)
+                : new OperationCanceledException(currentAsyncEvent.TaskCancellationToken!.Value);
+            EnqueueExceptionAsyncEvent(exception, currentAsyncEvent.ExceptionHandler);
+        }
+
+        private void EnqueueExceptionAsyncEvent(Exception exception, Func<Exception, Task>? exceptionHandler)
+        {
+            if (exceptionHandler == null)
+            {
+                throw exception;
+            }
+
+            var exceptionAsyncEvent = new AsyncEvent((Func<object?, Task>)exceptionHandler)
+            {
+                PrevTaskResult = exception
             };
             EnqueueAsyncEventInternal(exceptionAsyncEvent);
         }
@@ -100,7 +141,7 @@ namespace SharpEventLoop
             }
         }
 
-        public IAsyncEvent EnqueueEvent(Action eventHandler)
+        public IAsyncEvent EnqueueEvent(Action eventHandler, CancellationToken? cancellationToken = null)
         {
             Task WrappedEventHandler()
             {
@@ -111,16 +152,16 @@ namespace SharpEventLoop
             return EnqueueEvent(WrappedEventHandler);
         }
 
-        public IAsyncEvent EnqueueEvent(Func<Task> eventHandler)
+        public IAsyncEvent EnqueueEvent(Func<Task> eventHandler, CancellationToken? cancellationToken = null)
         {
-            return EnqueueEventInternal(eventHandler);
+            return EnqueueEventInternal(eventHandler, 0, cancellationToken);
         }
-        public IAsyncEvent EnqueueEvent<TResult>(Func<Task<TResult>> eventHandler)
+        public IAsyncEvent EnqueueEvent<TResult>(Func<Task<TResult>> eventHandler, CancellationToken? cancellationToken = null)
         {
             return EnqueueEvent((Func<Task>)eventHandler);
         }
 
-        public IAsyncEvent SetTimeout(Action timeoutEventHandler, long timeout)
+        public IAsyncEvent SetTimeout(Action timeoutEventHandler, long timeout, CancellationToken? cancellationToken = null)
         {
             Task WrappedTimeoutEventHandler()
             {
@@ -131,19 +172,22 @@ namespace SharpEventLoop
             return SetTimeout(WrappedTimeoutEventHandler, timeout);
         }
 
-        public IAsyncEvent SetTimeout(Func<Task> timeoutEventHandler, long timeout)
+        public IAsyncEvent SetTimeout(Func<Task> timeoutEventHandler, long timeout, CancellationToken? cancellationToken = null)
         {
-            return EnqueueEventInternal(timeoutEventHandler, timeout);
+            return EnqueueEventInternal(timeoutEventHandler, timeout, cancellationToken);
         }
 
-        public IAsyncEvent SetTimeout<TResult>(Func<Task<TResult>> timeoutEventHandler, long timeout)
+        public IAsyncEvent SetTimeout<TResult>(Func<Task<TResult>> timeoutEventHandler, long timeout, CancellationToken? cancellationToken = null)
         {
             return SetTimeout((Func<Task>)timeoutEventHandler, timeout);
         }
 
-        public IAsyncEvent SetInterval(Action intervalHandler, long interval)
+        public IAsyncEvent SetInterval(Action intervalHandler, long interval, CancellationToken? cancellationToken = null)
         {
-            var asyncEvent = new AsyncEvent();
+            var asyncEvent = new AsyncEvent
+            {
+                TaskCancellationToken = cancellationToken
+            };
             Task WrappedIntervalEventHandler()
             {
                 EnqueueNextIntervalEvent(asyncEvent, interval);
@@ -154,9 +198,12 @@ namespace SharpEventLoop
             return SetIntervalInternal(asyncEvent, WrappedIntervalEventHandler, interval);
         }
 
-        public IAsyncEvent SetInterval(Func<Task> intervalHandler, long interval)
+        public IAsyncEvent SetInterval(Func<Task> intervalHandler, long interval, CancellationToken? cancellationToken = null)
         {
-            var asyncEvent = new AsyncEvent();
+            var asyncEvent = new AsyncEvent
+            {
+                TaskCancellationToken = cancellationToken
+            };
             Task WrappedIntervalEventHandler()
             {
                 EnqueueNextIntervalEvent(asyncEvent, interval);
@@ -166,7 +213,7 @@ namespace SharpEventLoop
             return SetIntervalInternal(asyncEvent, WrappedIntervalEventHandler, interval);
         }
 
-        public IAsyncEvent SetInterval<TResult>(Func<Task<TResult>> intervalHandler, long interval)
+        public IAsyncEvent SetInterval<TResult>(Func<Task<TResult>> intervalHandler, long interval, CancellationToken? cancellationToken = null)
         {
             return SetInterval((Func<Task>)intervalHandler, interval);
         }
@@ -184,9 +231,12 @@ namespace SharpEventLoop
             EnqueueAsyncEventInternal(nextAsyncEvent, interval);
         }
 
-        private AsyncEvent EnqueueEventInternal(OneOf<Func<Task>, Func<object?, Task>> eventHandler, long timeout = 0)
+        private AsyncEvent EnqueueEventInternal(OneOf<Func<Task>, Func<object?, Task>> eventHandler, long timeout, CancellationToken? cancellationToken)
         {
-            var asyncEvent = new AsyncEvent(eventHandler);
+            var asyncEvent = new AsyncEvent(eventHandler)
+            {
+                TaskCancellationToken = cancellationToken
+            };
             EnqueueAsyncEventInternal(asyncEvent, timeout);
             return asyncEvent;
         }

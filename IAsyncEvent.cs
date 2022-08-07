@@ -2,17 +2,17 @@
 {
     public interface IAsyncEvent
     {
-        IAsyncEvent Then(Action eventHandler, long delay = 0);
+        IAsyncEvent Then(Action eventHandler, long delay = 0, CancellationToken? cancellationToken = null);
 
-        IAsyncEvent Then(Func<Task> eventHandler, long delay = 0);
+        IAsyncEvent Then(Func<Task> eventHandler, long delay = 0, CancellationToken? cancellationToken = null);
 
-        IAsyncEvent Then<TResult>(Func<Task<TResult?>> eventHandler, long delay = 0);
+        IAsyncEvent Then<TResult>(Func<Task<TResult?>> eventHandler, long delay = 0, CancellationToken? cancellationToken = null);
 
-        IAsyncEvent Then<TParam>(Action<TParam?> eventHandler, long delay = 0);
+        IAsyncEvent Then<TParam>(Action<TParam?> eventHandler, long delay = 0, CancellationToken? cancellationToken = null);
 
-        IAsyncEvent Then<TParam>(Func<TParam?, Task> eventHandler, long delay = 0);
+        IAsyncEvent Then<TParam>(Func<TParam?, Task> eventHandler, long delay = 0, CancellationToken? cancellationToken = null);
 
-        IAsyncEvent Then<TParam, TResult>(Func<TParam?, Task<TResult?>> eventHandler, long delay = 0);
+        IAsyncEvent Then<TParam, TResult>(Func<TParam?, Task<TResult?>> eventHandler, long delay = 0, CancellationToken? cancellationToken = null);
 
         IAsyncEvent Catch(Action<Exception> exceptionHandler);
 

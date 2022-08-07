@@ -14,7 +14,9 @@ namespace SharpEventLoop
 
         internal object? PrevTaskResult { get; set; }
 
-        internal long Delay { get; set; }
+        internal CancellationToken? TaskCancellationToken { get; init; }
+
+        internal long Delay { get; init; }
 
         internal AsyncEvent()
         {
@@ -25,7 +27,7 @@ namespace SharpEventLoop
             EventHandler = eventHandler;
         }
 
-        public IAsyncEvent Then(Action eventHandler, long delay = 0)
+        public IAsyncEvent Then(Action eventHandler, long delay = 0, CancellationToken? cancellationToken = null)
         {
             Task WrappedEventHandler()
             {
@@ -33,20 +35,20 @@ namespace SharpEventLoop
                 return Task.CompletedTask;
             }
 
-            return ThenInternal((Func<Task>)WrappedEventHandler, delay);
+            return ThenInternal((Func<Task>)WrappedEventHandler, delay, cancellationToken);
         }
 
-        public IAsyncEvent Then(Func<Task> eventHandler, long delay = 0)
+        public IAsyncEvent Then(Func<Task> eventHandler, long delay = 0, CancellationToken? cancellationToken = null)
         {
-            return ThenInternal(eventHandler, delay);
+            return ThenInternal(eventHandler, delay, cancellationToken);
         }
 
-        public IAsyncEvent Then<TResult>(Func<Task<TResult?>> eventHandler, long delay = 0)
+        public IAsyncEvent Then<TResult>(Func<Task<TResult?>> eventHandler, long delay = 0, CancellationToken? cancellationToken = null)
         {
-            return ThenInternal(eventHandler, delay);
+            return ThenInternal(eventHandler, delay, cancellationToken);
         }
 
-        public IAsyncEvent Then<TParam>(Action<TParam?> eventHandler, long delay = 0)
+        public IAsyncEvent Then<TParam>(Action<TParam?> eventHandler, long delay = 0, CancellationToken? cancellationToken = null)
         {
             Task WrappedEventHandler(object? param)
             {
@@ -54,33 +56,37 @@ namespace SharpEventLoop
                 return Task.CompletedTask;
             }
 
-            return ThenInternal((Func<object?, Task>)WrappedEventHandler, delay);
+            return ThenInternal((Func<object?, Task>)WrappedEventHandler, delay, cancellationToken);
         }
 
-        public IAsyncEvent Then<TParam>(Func<TParam?, Task> eventHandler, long delay = 0)
+        public IAsyncEvent Then<TParam>(Func<TParam?, Task> eventHandler, long delay = 0, CancellationToken? cancellationToken = null)
         {
             Task WrappedEventHandler(object? param)
             {
                 return eventHandler((TParam?) param);
             }
 
-            return ThenInternal((Func<object?, Task>)WrappedEventHandler, delay);
+            return ThenInternal((Func<object?, Task>)WrappedEventHandler, delay, cancellationToken);
         }
 
-        public IAsyncEvent Then<TParam, TResult>(Func<TParam?, Task<TResult?>> eventHandler, long delay = 0)
+        public IAsyncEvent Then<TParam, TResult>(Func<TParam?, Task<TResult?>> eventHandler, long delay = 0, CancellationToken? cancellationToken = null)
         {
             Task WrappedEventHandler(object? param)
             {
                 return eventHandler((TParam?) param);
             }
 
-            return ThenInternal((Func<object?, Task>)WrappedEventHandler, delay);
+            return ThenInternal((Func<object?, Task>)WrappedEventHandler, delay, cancellationToken);
         }
 
-        private IAsyncEvent ThenInternal(OneOf<Func<Task>, Func<object?, Task>> eventHandler, long delay)
+        private IAsyncEvent ThenInternal(OneOf<Func<Task>, Func<object?, Task>> eventHandler, long delay, CancellationToken? cancellationToken)
         {
-            Delay = delay;
-            Next = new AsyncEvent(eventHandler);
+            Next = new AsyncEvent(eventHandler)
+            {
+                Delay = delay,
+                TaskCancellationToken = cancellationToken
+            };
+
             return Next;
         }
 
@@ -113,9 +119,13 @@ namespace SharpEventLoop
 
         internal AsyncEvent DeepCopy()
         {
-            var asyncEventCopy = new AsyncEvent(EventHandler!.Value)
+            var asyncEventCopy = new AsyncEvent
             {
-                Delay = Delay
+                EventHandler = EventHandler,
+                Delay = Delay,
+                PrevTaskResult = PrevTaskResult,
+                TaskCancellationToken = TaskCancellationToken,
+                ExceptionHandler = ExceptionHandler
             };
             if (Next != null)
             {
