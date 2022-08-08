@@ -60,6 +60,13 @@ public static class Program
                 return Task.CompletedTask;
             }, 400);
 
+        _eventLoop.EnqueueEvent(() => Task.FromResult(35))
+            .Then((int number) =>
+            {
+                Console.WriteLine($"AFTER FINISHING RESULT: {number}");
+                return Task.CompletedTask;
+            }, 400);
+
         return Task.CompletedTask;
     }
 
@@ -83,7 +90,13 @@ public static class Program
         Console.WriteLine("Request is start sending");
         _taskCompletionSource = new TaskCompletionSource();
         _progress = 0;
-        _eventLoop!.SetTimeout(CheckRequestStatus, 1000);
+        var cancellationTokenSource = new CancellationTokenSource();
+        _eventLoop!.SetTimeout(CheckRequestStatus, 1000, cancellationTokenSource.Token)
+            .Catch(ex =>
+            {
+                Console.WriteLine(ex.Message);
+            });
+        _eventLoop.SetTimeout(() => cancellationTokenSource.Cancel(), 500);
         return _taskCompletionSource.Task;
     }
 

@@ -28,18 +28,21 @@ namespace SharpEventLoop
             }
             
             var asyncEvent = _eventQueue.Dequeue();
-            StartRunningAsyncEvent(asyncEvent);
+            if (!StartRunningAsyncEvent(asyncEvent))
+            {
+                return;
+            }
 
             _runningEvents.AddLast(asyncEvent);
             _currentRunningEventNode ??= _runningEvents.First;
         }
 
-        private void StartRunningAsyncEvent(AsyncEvent asyncEvent)
+        private bool StartRunningAsyncEvent(AsyncEvent asyncEvent)
         {
             if (asyncEvent.TaskCancellationToken is {IsCancellationRequested: true})
             {
                 HandleCanceledEventException(asyncEvent);
-                return;
+                return false;
             }
 
             try
@@ -47,10 +50,12 @@ namespace SharpEventLoop
                 asyncEvent.CurrentTask = asyncEvent.EventHandler!.Value.Match(
                     funcNoParams => funcNoParams(),
                     funcWithParam => funcWithParam(asyncEvent.PrevTaskResult));
+                return true;
             }
             catch (Exception exception)
             {
                 EnqueueExceptionAsyncEvent(exception, asyncEvent.ExceptionHandler);
+                return false;
             }
         }
 
@@ -108,7 +113,12 @@ namespace SharpEventLoop
                 throw exception;
             }
 
-            var exceptionAsyncEvent = new AsyncEvent((Func<object?, Task>)exceptionHandler)
+            Task WrappedExceptionHandler(object? param)
+            {
+                return exceptionHandler((Exception)param!);
+            }
+
+            var exceptionAsyncEvent = new AsyncEvent((Func<object?, Task>)WrappedExceptionHandler)
             {
                 PrevTaskResult = exception
             };
@@ -122,9 +132,11 @@ namespace SharpEventLoop
                 return;
             }
 
-            if (currentAsyncEvent.CurrentTask is Task<object?> taskWithResult)
+            var taskType = currentAsyncEvent.CurrentTask.GetType();
+            if (taskType.IsGenericType)
             {
-                currentAsyncEvent.Next.PrevTaskResult = taskWithResult.Result;
+                currentAsyncEvent.Next.PrevTaskResult = taskType.GetProperty(nameof(Task<object>.Result))!
+                    .GetValue(currentAsyncEvent.CurrentTask);
             }
 
             EnqueueAsyncEventInternal(currentAsyncEvent.Next, currentAsyncEvent.Delay);
