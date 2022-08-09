@@ -43,6 +43,16 @@ namespace SharpEventLoop
             return ThenInternal(eventHandler, delay, cancellationToken);
         }
 
+        public IAsyncEvent Then<TResult>(Func<TResult?> eventHandler, long delay = 0, CancellationToken? cancellationToken = null)
+        {
+            Task WrappedEventHandler()
+            {
+                return Task.FromResult(eventHandler());
+            }
+
+            return ThenInternal((Func<Task>)WrappedEventHandler, delay, cancellationToken);
+        }
+
         public IAsyncEvent Then<TResult>(Func<Task<TResult?>> eventHandler, long delay = 0, CancellationToken? cancellationToken = null)
         {
             return ThenInternal(eventHandler, delay, cancellationToken);
@@ -64,6 +74,16 @@ namespace SharpEventLoop
             Task WrappedEventHandler(object? param)
             {
                 return eventHandler((TParam?) param);
+            }
+
+            return ThenInternal((Func<object?, Task>)WrappedEventHandler, delay, cancellationToken);
+        }
+
+        public IAsyncEvent Then<TParam, TResult>(Func<TParam?, TResult?> eventHandler, long delay = 0, CancellationToken? cancellationToken = null)
+        {
+            Task WrappedEventHandler(object? param)
+            {
+                return Task.FromResult(eventHandler((TParam?)param));
             }
 
             return ThenInternal((Func<object?, Task>)WrappedEventHandler, delay, cancellationToken);
@@ -102,11 +122,6 @@ namespace SharpEventLoop
         }
 
         public IAsyncEvent Catch(Func<Exception, Task> exceptionHandler)
-        {
-            return CatchInternal(exceptionHandler);
-        }
-
-        public IAsyncEvent Catch<TResult>(Func<Exception, Task<TResult?>> exceptionHandler)
         {
             return CatchInternal(exceptionHandler);
         }

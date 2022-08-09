@@ -139,7 +139,7 @@ namespace SharpEventLoop
                     .GetValue(currentAsyncEvent.CurrentTask);
             }
 
-            EnqueueAsyncEventInternal(currentAsyncEvent.Next, currentAsyncEvent.Delay);
+            EnqueueAsyncEventInternal(currentAsyncEvent.Next);
         }
 
         public void Run(CancellationToken cancellationToken)
@@ -161,16 +161,27 @@ namespace SharpEventLoop
                 return Task.CompletedTask;
             }
 
-            return EnqueueEvent(WrappedEventHandler);
+            return EnqueueEvent(WrappedEventHandler, cancellationToken);
         }
 
         public IAsyncEvent EnqueueEvent(Func<Task> eventHandler, CancellationToken? cancellationToken = null)
         {
             return EnqueueEventInternal(eventHandler, 0, cancellationToken);
         }
-        public IAsyncEvent EnqueueEvent<TResult>(Func<Task<TResult>> eventHandler, CancellationToken? cancellationToken = null)
+
+        public IAsyncEvent EnqueueEvent<TResult>(Func<TResult?> eventHandler, CancellationToken? cancellationToken = null)
         {
-            return EnqueueEvent((Func<Task>)eventHandler);
+            Task WrappedEventHandler()
+            {
+                return Task.FromResult(eventHandler());
+            }
+
+            return EnqueueEvent(WrappedEventHandler, cancellationToken);
+        }
+
+        public IAsyncEvent EnqueueEvent<TResult>(Func<Task<TResult?>> eventHandler, CancellationToken? cancellationToken = null)
+        {
+            return EnqueueEvent((Func<Task>)eventHandler, cancellationToken);
         }
 
         public IAsyncEvent SetTimeout(Action timeoutEventHandler, long timeout, CancellationToken? cancellationToken = null)
@@ -181,7 +192,7 @@ namespace SharpEventLoop
                 return Task.CompletedTask;
             }
             
-            return SetTimeout(WrappedTimeoutEventHandler, timeout);
+            return SetTimeout(WrappedTimeoutEventHandler, timeout, cancellationToken);
         }
 
         public IAsyncEvent SetTimeout(Func<Task> timeoutEventHandler, long timeout, CancellationToken? cancellationToken = null)
@@ -189,73 +200,102 @@ namespace SharpEventLoop
             return EnqueueEventInternal(timeoutEventHandler, timeout, cancellationToken);
         }
 
-        public IAsyncEvent SetTimeout<TResult>(Func<Task<TResult>> timeoutEventHandler, long timeout, CancellationToken? cancellationToken = null)
+        public IAsyncEvent SetTimeout<TResult>(Func<TResult?> timeoutEventHandler, long timeout, CancellationToken? cancellationToken = null)
         {
-            return SetTimeout((Func<Task>)timeoutEventHandler, timeout);
+            Task WrappedTimeoutEventHandler()
+            {
+                return Task.FromResult(timeoutEventHandler());
+            }
+
+            return SetTimeout(WrappedTimeoutEventHandler, timeout, cancellationToken);
+        }
+
+        public IAsyncEvent SetTimeout<TResult>(Func<Task<TResult?>> timeoutEventHandler, long timeout, CancellationToken? cancellationToken = null)
+        {
+            return SetTimeout((Func<Task>)timeoutEventHandler, timeout, cancellationToken);
         }
 
         public IAsyncEvent SetInterval(Action intervalHandler, long interval, CancellationToken? cancellationToken = null)
         {
             var asyncEvent = new AsyncEvent
             {
-                TaskCancellationToken = cancellationToken
+                TaskCancellationToken = cancellationToken,
+                Delay = interval
             };
             Task WrappedIntervalEventHandler()
             {
-                EnqueueNextIntervalEvent(asyncEvent, interval);
+                EnqueueNextIntervalEvent(asyncEvent);
                 intervalHandler();
                 return Task.CompletedTask;
             }
 
-            return SetIntervalInternal(asyncEvent, WrappedIntervalEventHandler, interval);
+            return SetIntervalInternal(asyncEvent, WrappedIntervalEventHandler);
         }
 
         public IAsyncEvent SetInterval(Func<Task> intervalHandler, long interval, CancellationToken? cancellationToken = null)
         {
             var asyncEvent = new AsyncEvent
             {
-                TaskCancellationToken = cancellationToken
+                TaskCancellationToken = cancellationToken,
+                Delay = interval
             };
             Task WrappedIntervalEventHandler()
             {
-                EnqueueNextIntervalEvent(asyncEvent, interval);
+                EnqueueNextIntervalEvent(asyncEvent);
                 return intervalHandler();
             }
 
-            return SetIntervalInternal(asyncEvent, WrappedIntervalEventHandler, interval);
+            return SetIntervalInternal(asyncEvent, WrappedIntervalEventHandler);
         }
 
-        public IAsyncEvent SetInterval<TResult>(Func<Task<TResult>> intervalHandler, long interval, CancellationToken? cancellationToken = null)
+        public IAsyncEvent SetInterval<TResult>(Func<TResult?> intervalHandler, long interval, CancellationToken? cancellationToken = null)
+        {
+            var asyncEvent = new AsyncEvent
+            {
+                TaskCancellationToken = cancellationToken,
+                Delay = interval
+            };
+            Task WrappedIntervalEventHandler()
+            {
+                EnqueueNextIntervalEvent(asyncEvent);
+                return Task.FromResult(intervalHandler());
+            }
+
+            return SetIntervalInternal(asyncEvent, WrappedIntervalEventHandler);
+        }
+
+        public IAsyncEvent SetInterval<TResult>(Func<Task<TResult?>> intervalHandler, long interval, CancellationToken? cancellationToken = null)
         {
             return SetInterval((Func<Task>)intervalHandler, interval);
         }
 
-        private IAsyncEvent SetIntervalInternal(AsyncEvent asyncEvent, Func<Task> wrappedIntervalEventHandler, long interval)
+        private IAsyncEvent SetIntervalInternal(AsyncEvent asyncEvent, Func<Task> wrappedIntervalEventHandler)
         {
             asyncEvent.EventHandler = wrappedIntervalEventHandler;
-            EnqueueAsyncEventInternal(asyncEvent, interval);
+            EnqueueAsyncEventInternal(asyncEvent);
             return asyncEvent;
         }
 
-        private void EnqueueNextIntervalEvent(AsyncEvent asyncEvent, long interval)
+        private void EnqueueNextIntervalEvent(AsyncEvent asyncEvent)
         {
             var nextAsyncEvent = asyncEvent.DeepCopy();
-            EnqueueAsyncEventInternal(nextAsyncEvent, interval);
+            EnqueueAsyncEventInternal(nextAsyncEvent);
         }
 
         private AsyncEvent EnqueueEventInternal(OneOf<Func<Task>, Func<object?, Task>> eventHandler, long timeout, CancellationToken? cancellationToken)
         {
             var asyncEvent = new AsyncEvent(eventHandler)
             {
-                TaskCancellationToken = cancellationToken
+                TaskCancellationToken = cancellationToken,
+                Delay = timeout
             };
-            EnqueueAsyncEventInternal(asyncEvent, timeout);
+            EnqueueAsyncEventInternal(asyncEvent);
             return asyncEvent;
         }
 
-        private void EnqueueAsyncEventInternal(AsyncEvent asyncEvent, long timeout = 0)
+        private void EnqueueAsyncEventInternal(AsyncEvent asyncEvent)
         {
-            _eventQueue.Enqueue(asyncEvent, _now + timeout);
+            _eventQueue.Enqueue(asyncEvent, _now + asyncEvent.Delay);
         }
     }
 }

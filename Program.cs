@@ -60,7 +60,7 @@ public static class Program
                 return Task.CompletedTask;
             }, 400);
 
-        _eventLoop.EnqueueEvent(() => Task.FromResult(35))
+        _eventLoop.EnqueueEvent(() => 35)
             .Then((int number) =>
             {
                 Console.WriteLine($"AFTER FINISHING RESULT: {number}");
